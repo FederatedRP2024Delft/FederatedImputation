@@ -17,10 +17,12 @@ from tensorboardX import SummaryWriter
 
 from options import args_parser
 from models import ResNet, Bottleneck
+from image_classifier.image_classifier import MNISTClassifier
 from vae.mnist_vae import VaeAutoencoderClassifier, ConditionalVae
 from update import LocalUpdate, test_inference
 from models import MLP, CNNMnist, CNNFashion_Mnist, CNNCifar, ExquisiteNetV2, ExquisiteNetV1
 from utils import get_dataset, average_weights, exp_details, fed_avg
+import torchvision
 
 if __name__ == '__main__':
     start_time = time.time()
@@ -79,13 +81,14 @@ if __name__ == '__main__':
     # Set the model to train and send it to device.
     global_model.to(device)
     global_model.train()
-    print(global_model)
+    # print(global_model)
 
     # copy weights
     global_weights = global_model.state_dict()
 
     # Training
-    train_loss, train_accuracy = [], []
+    train_losses, train_accuracies = [], []
+    test_losses, test_accuracies = [], []
     val_acc_list, net_list = [], []
     cv_loss, cv_acc = [], []
     print_every = 2
@@ -95,7 +98,7 @@ if __name__ == '__main__':
 
     for epoch in tqdm(range(args.epochs)):
         local_weights, local_losses = [], []
-        print(f'\n | Global Training Round : {epoch+1} |\n')
+        # print(f'\n | Global Training Round : {epoch+1} |\n')
 
         global_model.train()
         m = max(int(args.frac * args.num_users), 1)
@@ -114,9 +117,9 @@ if __name__ == '__main__':
                 model=model_copy, global_round=epoch)
             local_weights.append(copy.deepcopy(w))
             train_losses_per_client[idx][epoch] = loss
-            print(f"actual loss: {loss}")
+            # print(f"actual loss: {loss}")
             if(np.isnan(loss)):
-                print("loss was nan!!!!!!!!!!!!!!!")
+                # print("loss was nan!!!!!!!!!!!!!!!")
                 loss = local_losses[-1] if len(local_losses) > 0 else 0
             local_losses.append(copy.deepcopy(loss))
 
@@ -127,8 +130,9 @@ if __name__ == '__main__':
         global_model.load_state_dict(global_weights)
 
         loss_avg = sum(local_losses) / len(local_losses)
-        print("dfas", sum(local_losses), len(local_losses))
-        train_loss.append(loss_avg)
+        # print("sum local losses: ", sum(local_losses))
+        # print("Num of local losses: ", len(local_losses))
+        train_losses.append(loss_avg)
 
         # Calculate avg training accuracy over all users at every epoch
         list_acc, list_loss = [], []
@@ -140,54 +144,114 @@ if __name__ == '__main__':
             list_acc.append(acc)
             test_losses_per_client[c][epoch] = loss
             test_accuracies_per_client[c][epoch] = acc
-            print("fsdf", acc, loss)
-        train_accuracy.append(sum(list_acc)/len(list_acc))
+            # print("Accuracy: ", acc)
+            # print("Loss: ", loss)
+        train_accuracies.append(sum(list_acc) / len(list_acc))
+
+
+
+        # print(f"IID data total communication rounds {i} accuracy: ", accuracy)
 
         # print global training loss after every 'i' rounds
-        if (epoch+1) % print_every == 0:
-            print(f' \nAvg Training Stats after {epoch+1} global rounds:')
-            print(f'Training Loss : {np.mean(np.array(train_loss))}')
-            print('Train Accuracy: {:.2f}% \n'.format(100*train_accuracy[-1]))
+        # if (epoch+1) % print_every == 0:
+            # print(f' \nAvg Training Stats after {epoch+1} global rounds:')
+            # print(f'Training Loss : {np.mean(np.array(train_loss))}')
+            # print('Train Accuracy: {:.2f}% \n'.format(100*train_accuracy[-1]))
 
-    # Test inference after completion of training
-    test_acc, test_loss = test_inference(args, global_model, test_dataset)
-    print(f"trainloss: {train_loss}")
-    print(f' \n Results after {args.epochs} global rounds of training:')
-    print("|---- Avg Train Accuracy: {:.2f}%".format(100*train_accuracy[-1]))
-    print("|---- Test Accuracy: {:.2f}%".format(100*test_acc))
+        # if cvae, test against classifier
+        if args.model == 'cvae':
+            # load data
+            num_data = 60000
+            training_data = torchvision.datasets.FashionMNIST(root='../../data/FMNIST_train', train=True, download=True,
+                                                              transform=torchvision.transforms.ToTensor())
+            testing_data = torchvision.datasets.FashionMNIST(root='../../data/FMNIST_test', train=False, download=True,
+                                                             transform=torchvision.transforms.ToTensor())
+
+            input = training_data.data[:num_data] / 255.0  # convert to float
+            labels = training_data.targets[:num_data]
+
+            # load classifier
+            model = "classifier"
+            dataset = "fmnist"
+            batch_size = 64
+            epoch = 10
+
+            classifier = MNISTClassifier(input_size=784, num_classes=10)
+            classifier.train_model(training_data, batch_size=batch_size, epochs=epoch)
+            accuracy = classifier.test_model(testing_data)
+            print("Test accuracy: ", accuracy)
+
+            data_count = 10000
+            ratios = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+            images = []
+            labels = []
+
+            for label_idx, ratio in enumerate(ratios):
+                num_samples_to_generate = int(data_count * ratio)
+                images.append(
+                    global_model.generate_data(n_samples=num_samples_to_generate, target_label=label_idx).cpu().detach())
+
+                label = torch.zeros((num_samples_to_generate, 10), device=device)
+                label[:, label_idx] = 1
+                labels.append(label.cpu().detach())
+
+            final_images = torch.vstack(images)
+            final_labels = torch.vstack(labels)
+
+            assert final_images.shape[0] == final_labels.shape[0]
+
+            accuracy = classifier.test_model_syn_img_label(final_images, final_labels)
+            print(f"IID-id {args.iid}, Dirichlet beta {args.dirichlet}, communication round {epoch + 1}, accuracy: ", accuracy)
+
+        # Test inference after completion of training
+        test_acc, test_loss = test_inference(args, global_model, test_dataset)
+
+        test_losses.append(test_loss)
+        test_accuracies.append(test_acc)
+        print("Train loss: ", train_losses)
+        print("Train accuracy: ", train_accuracies)
+        print("Test loss: ", test_losses)
+        print("Test accuracy: ", test_accuracies)
+    # print(f"trainloss: {train_loss}")
+    # print(f' \n Results after {args.epochs} global rounds of training:')
+    # print("|---- Avg Train Accuracy: {:.2f}%".format(100*train_accuracy[-1]))
+    # print("|---- Test Accuracy: {:.2f}%".format(100*test_acc))
+
     # Saving the objects train_loss and train_accuracy:
-    file_name = '../save/objects/fedimputed_cvae_{}_{}_{}_{}_{}_C[{}]_iid[{}]_E[{}]_B[{}].pkl'.\
-        format(args.num_generate, args.dirichlet, args.dataset, args.model, args.epochs, args.frac, args.iid,
+    file_name = '/home/neo/projects/FederatedImputation/save/objects/cvae_{}_{}_{}_{}_{}_C[{}]_iid[{}]_E[{}]_B[{}].pkl'.\
+        format(args.num_users, args.dirichlet, args.dataset, args.model, args.epochs, args.frac, args.iid,
                args.local_ep, args.local_bs)
 
     with open(file_name, 'wb') as f:
         pickle.dump([train_losses_per_client, test_losses_per_client, test_accuracies_per_client], f)
 
-    print('\n Total Run Time: {0:0.4f}'.format(time.time()-start_time))
+    # print('\n Total Run Time: {0:0.4f}'.format(time.time()-start_time))
 
-    # PLOTTING (optional)
-    import matplotlib
-    import matplotlib.pyplot as plt
-    matplotlib.use('Agg')
+    #
+    # # PLOTTING (optional)
+    # import matplotlib
+    # import matplotlib.pyplot as plt
+    # matplotlib.use('Agg')
+    #
+    # # Plot Loss curve
+    # plt.figure()
+    # plt.title('Training Loss vs Communication rounds')
+    # plt.plot(range(len(train_loss)), train_loss, color='r')
+    # plt.ylabel('Training loss')
+    # plt.xlabel('Communication Rounds')
+    # plt.savefig('/home/neo/projects/FederatedImputation/save/cvae_{}_{}_{}_{}_{}_C[{}]_iid[{}]_E[{}]_B[{}]_loss.png'.
+    #             format(args.num_users, args.dirichlet, args.dataset, args.model, args.epochs, args.frac,
+    #                    args.iid, args.local_ep, args.local_bs))
+    #
+    # # Plot Average Accuracy vs Communication rounds
+    # plt.figure()
+    # plt.title('Average Accuracy vs Communication rounds')
+    # plt.plot(range(len(train_accuracy)), train_accuracy, color='k')
+    # plt.ylabel('Average Accuracy')
+    # plt.xlabel('Communication Rounds')
+    # plt.savefig('/home/neo/projects/FederatedImputation/save/cvae_{}_{}_{}_{}_{}_C[{}]_iid[{}]_E[{}]_B[{}]_acc.png'.
+    #             format(args.num_users, args.dirichlet, args.dataset, args.model, args.epochs, args.frac,
+    #                    args.iid, args.local_ep, args.local_bs))
 
-    # Plot Loss curve
-    plt.figure()
-    plt.title('Training Loss vs Communication rounds')
-    plt.plot(range(len(train_loss)), train_loss, color='r')
-    plt.ylabel('Training loss')
-    plt.xlabel('Communication Rounds')
-    plt.savefig('../save/fedimputed_cvae_{}_{}_{}_{}_{}_C[{}]_iid[{}]_E[{}]_B[{}]_loss.png'.
-                format(args.num_generate, args.dirichlet, args.dataset, args.model, args.epochs, args.frac,
-                       args.iid, args.local_ep, args.local_bs))
-
-    # Plot Average Accuracy vs Communication rounds
-    plt.figure()
-    plt.title('Average Accuracy vs Communication rounds')
-    plt.plot(range(len(train_accuracy)), train_accuracy, color='k')
-    plt.ylabel('Average Accuracy')
-    plt.xlabel('Communication Rounds')
-    plt.savefig('../save/fedimputed_cvae_{}_{}_{}_{}_{}_C[{}]_iid[{}]_E[{}]_B[{}]_acc.png'.
-                format(args.num_generate, args.dirichlet, args.dataset, args.model, args.epochs, args.frac,
-                       args.iid, args.local_ep, args.local_bs))
-
-    torch.save(global_model.state_dict(), f"C:\\Users\\LohithSai\\Desktop\\FederatedImputation\\vae_data\models\\{args.num_generate}_{args.model}_{args.dirichlet}_cvae.pth")
+    torch.save(global_model.state_dict(), f"/home/neo/projects/RP_data/models/federated_{args.model}_{args.dataset}_{args.iid}_{args.dirichlet}_{args.epochs}_{args.local_ep}_{args.num_users}.pt")
+    # torch.save(global_model, f"/home/neo/projects/RP_data/models/cvae_{args.num_generate}_{args.model}_{args.dirichlet}_cvae.pt")

@@ -257,7 +257,7 @@ class VaeAutoencoderClassifier(nn.Module):
                     kl_loss_li.append(
                         kl_div_fn(self.z_dist)
                     )
-            print("Finished epoch: ", epoch + 1)
+            # print("Finished epoch: ", epoch + 1)
         return (
             vae_classifier_model.to('cpu'),
             total_losses,

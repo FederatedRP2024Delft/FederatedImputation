@@ -167,7 +167,6 @@ def mnist_noniid_unequal(dataset, num_users):
                     (dict_users[i], idxs[rand*num_imgs:(rand+1)*num_imgs]),
                     axis=0)
     else:
-
         for i in range(num_users):
             shard_size = random_shard_size[i]
             rand_set = set(np.random.choice(idx_shard, shard_size,

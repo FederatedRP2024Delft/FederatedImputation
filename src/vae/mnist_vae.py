@@ -1,4 +1,4 @@
-from src.utils import kl_loss, vae_loss_fn, vae_classifier_loss_fn
+from utils import kl_loss, vae_loss_fn, vae_classifier_loss_fn
 
 import torch
 from torch import Tensor, tensor, device, cuda
@@ -167,7 +167,7 @@ class VaeAutoencoder(nn.Module):
                     kl_loss_li.append(
                         kl_div_fn(model.z_dist)
                     )
-            print("Finished epoch: ", epoch + 1)
+            # print("Finished epoch: ", epoch + 1)
         return (
             model.to('cpu'),
             vae_loss_li,
@@ -337,7 +337,7 @@ class VaeAutoencoderClassifier(nn.Module):
                     kl_loss_li.append(
                         kl_div_fn(model.z_dist)
                     )
-            print("Finished epoch: ", epoch + 1)
+            # print("Finished epoch: ", epoch + 1)
         return (
             model.to('cpu'),
             total_losses,
@@ -448,7 +448,7 @@ class ConditionalVae(nn.Module):
                     kl_loss_li.append(
                         kl_div_fn(cvae.z_dist)
                     )
-            print("Finished epoch of conditional: ", epoch + 1)
+            # print("Finished epoch of conditional: ", epoch + 1)
         return (
             cvae.to('cpu'),
             vae_loss_li,

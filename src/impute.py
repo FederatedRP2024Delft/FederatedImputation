@@ -3,7 +3,7 @@ import random
 import numpy as np
 import torch.utils.data
 
-from src.vae.mnist_vae import VaeAutoencoderClassifier, ConditionalVae
+from vae.mnist_vae import VaeAutoencoderClassifier, ConditionalVae
 
 
 def impute_naive(k, trained_vae:VaeAutoencoderClassifier, initial_dataset):
