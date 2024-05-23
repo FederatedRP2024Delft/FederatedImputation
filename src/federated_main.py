@@ -108,7 +108,7 @@ if __name__ == '__main__':
             local_model = LocalUpdate(args=args, dataset=train_dataset,
                                       idxs=user_groups[idx], logger=logger)
             model_copy = None
-            if(args.model == 'vae' or args.model == 'cvae'):
+            if (args.model == 'vae' or args.model == 'cvae'):
                 model_copy = type(global_model)()  # create a new instance of the same model
                 model_copy.load_state_dict(global_model.state_dict())
             else:
@@ -118,7 +118,7 @@ if __name__ == '__main__':
             local_weights.append(copy.deepcopy(w))
             train_losses_per_client[idx][epoch] = loss
             # print(f"actual loss: {loss}")
-            if(np.isnan(loss)):
+            if np.isnan(loss):
                 # print("loss was nan!!!!!!!!!!!!!!!")
                 loss = local_losses[-1] if len(local_losses) > 0 else 0
             local_losses.append(copy.deepcopy(loss))
